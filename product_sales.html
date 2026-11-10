@@ -1,0 +1,167 @@
+
+{% extends "base.html" %}
+
+{% block title %}Product Sales Analytics{% endblock %}
+{% block subtitle %}Daily and weekly product-wise sales report{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h2>Product-wise Sales Analytics</h2>
+
+    <label for="salesMode">Sales Period</label>
+    <select id="salesMode" onchange="loadProductSales()">
+        <option value="daily">Daily Sales</option>
+        <option value="weekly">Weekly Sales</option>
+    </select>
+
+    <h3 id="salesHeading">Daily Product Sales</h3>
+
+    <div style="margin:15px 0;font-size:18px">
+        Total Quantity:
+        <strong id="totalQuantity">0</strong>
+    </div>
+
+    <div style="height:380px;position:relative">
+        <canvas id="productSalesChart"></canvas>
+    </div>
+</section>
+
+<section class="card" style="margin-top:20px">
+    <h3>Product-wise Quantity</h3>
+    <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+            <thead>
+                <tr>
+                    <th style="text-align:left;padding:10px">Product</th>
+                    <th style="text-align:right;padding:10px">Quantity</th>
+                </tr>
+            </thead>
+            <tbody id="productSalesTable"></tbody>
+        </table>
+    </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+let productChart = null;
+let salesData = {};
+
+async function loadProductSales() {
+    const response = await fetch("/api/product-sales");
+    salesData = await response.json();
+
+    if (!response.ok) {
+        alert(salesData.error || "Unable to load sales data");
+        return;
+    }
+
+    const mode = document.getElementById("salesMode").value;
+    const selectedData = salesData[mode] || {};
+
+    document.getElementById("salesHeading").textContent =
+        mode === "daily" ? "Daily Product Sales" : "Weekly Product Sales";
+
+    const labels = Object.keys(selectedData).sort((a, b) => {
+        const parseDate = value => {
+            const [d, m, y] = value.split("-");
+            return new Date(y, m - 1, d);
+        };
+        return parseDate(a) - parseDate(b);
+    });
+
+    const products = [...new Set(
+        Object.values(selectedData).flatMap(day =>
+            Object.keys(day)
+        )
+    )].sort();
+
+    const datasets = products.map((product, index) => ({
+        label: product,
+        data: labels.map(day => selectedData[day][product] || 0),
+        borderWidth: 2,
+        tension: 0.3,
+        backgroundColor: `hsl(${index * 47 % 360}, 65%, 60%)`,
+        borderColor: `hsl(${index * 47 % 360}, 65%, 45%)`
+    }));
+
+    const totals = {};
+    products.forEach(product => totals[product] = 0);
+
+    Object.values(selectedData).forEach(day => {
+        Object.entries(day).forEach(([product, qty]) => {
+            totals[product] = (totals[product] || 0) + qty;
+        });
+    });
+
+    const grandTotal = Object.values(totals)
+        .reduce((sum, qty) => sum + qty, 0);
+
+    document.getElementById("totalQuantity").textContent = grandTotal;
+
+    document.getElementById("productSalesTable").innerHTML =
+        products.map(product => `
+            <tr>
+                <td style="padding:10px;border-bottom:1px solid #ddd">
+                    ${escapeHtml(product)}
+                </td>
+                <td style="padding:10px;text-align:right;border-bottom:1px solid #ddd">
+                    ${totals[product]}
+                </td>
+            </tr>
+        `).join("") || `
+            <tr><td colspan="2" style="padding:12px">No sales data found</td></tr>
+        `;
+
+    const ctx = document.getElementById("productSalesChart");
+
+    if (productChart) productChart.destroy();
+
+    productChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels,
+            datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: "index",
+                intersect: false
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: mode === "daily" ? "Date" : "Week Starting"
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: "Quantity Sold"
+                    },
+                    ticks: {
+                        precision: 0
+                    }
+                }
+            }
+        }
+    });
+}
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+    })[char]);
+}
+
+loadProductSales();
+</script>
+{% endblock %}
